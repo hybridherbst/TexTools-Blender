@@ -34,6 +34,7 @@ from . import op_island_align_edge
 from . import op_island_align_sort
 from . import op_island_align_world
 from . import op_island_centralize
+from . import op_island_grid_straighten
 from . import op_island_mirror
 from . import op_island_rotate_90
 from . import op_island_straighten_edge_loops
@@ -979,6 +980,12 @@ class UI_PT_Panel_Layout(Panel):
                      icon_value=icon_get("op_island_straighten_edge_loops"))
         row.operator(op_rectify.op.bl_idname, text="Rectify", icon_value=icon_get("op_rectify"))
 
+        row = col.row(align=True)
+        row.operator(op_island_grid_straighten.op.bl_idname, text="Grid Straight",
+                     icon_value=icon_get("op_align_horizontal")).relax = False
+        row.operator(op_island_grid_straighten.op.bl_idname, text="Grid Relax",
+                     icon_value=icon_get("op_relax")).relax = True
+
         split = col.split(factor=0.75, align=True)
         split.operator(op_uv_unwrap.op.bl_idname, text="Unwrap", icon_value=icon_get("op_uv_unwrap")).axis = ''
         row = split.row(align=True)
@@ -1652,6 +1659,7 @@ classes = (
     op_island_align_edge.op,
     op_island_align_sort.op,
     op_island_align_world.op,
+    op_island_grid_straighten.op,
     op_island_mirror.op,
     op_island_rotate_90.op,
     op_island_straighten_edge_loops.op,
