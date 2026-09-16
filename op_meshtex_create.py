@@ -6,6 +6,46 @@ from . import utilities_uv
 from .services import uv_morph_service
 
 
+_RELAX_ISLAND_LAYER = "_textools_relax_island"
+_ORIGINAL_FACE_LAYER = "_textools_original_face"
+
+
+def _tag_relax_faces(bm, faces_by_island):
+    """Persist island and source-face identity across edit-mode topology operators."""
+    bm.faces.ensure_lookup_table()
+    bm.faces.index_update()
+    island_face_indices = [[face.index for face in faces] for faces in faces_by_island]
+    island_layer = bm.faces.layers.int.get(_RELAX_ISLAND_LAYER)
+    if island_layer is None:
+        island_layer = bm.faces.layers.int.new(_RELAX_ISLAND_LAYER)
+    original_layer = bm.faces.layers.int.get(_ORIGINAL_FACE_LAYER)
+    if original_layer is None:
+        original_layer = bm.faces.layers.int.new(_ORIGINAL_FACE_LAYER)
+
+    for face in bm.faces:
+        face[island_layer] = 0
+        face[original_layer] = face.index + 1
+    bm.faces.ensure_lookup_table()
+    for island_index, face_indices in enumerate(island_face_indices, start=1):
+        for face_index in face_indices:
+            bm.faces[face_index][island_layer] = island_index
+    return _get_tagged_relax_faces(bm)
+
+
+def _get_tagged_relax_faces(bm):
+    """Reacquire valid BMFace handles after an operator rebuilt the edit BMesh."""
+    island_layer = bm.faces.layers.int.get(_RELAX_ISLAND_LAYER)
+    if island_layer is None:
+        return []
+    island_count = max((face[island_layer] for face in bm.faces), default=0)
+    faces_by_island = [[] for _ in range(island_count)]
+    for face in bm.faces:
+        island_index = face[island_layer]
+        if island_index > 0:
+            faces_by_island[island_index - 1].append(face)
+    return faces_by_island
+
+
 class op(bpy.types.Operator):
     bl_idname = "uv.textools_meshtex_create"
     bl_label = "UV Mesh"
@@ -107,6 +147,8 @@ def create_uv_mesh(self, context, obj, sk_create=True, bool_scale=True, delete_u
     uv_layers = bm.loops.layers.uv.verify()
 
     faces_by_island = utilities_uv.getSelectionIslands(bm, uv_layers, need_faces_selected=False)
+    bm = bmesh.from_edit_mesh(mesh_obj.data)
+    uv_layers = bm.loops.layers.uv.verify()
 
     if not faces_by_island:
         bpy.data.objects.remove(bpy.data.objects[obj_name], do_unlink=True)
@@ -118,6 +160,10 @@ def create_uv_mesh(self, context, obj, sk_create=True, bool_scale=True, delete_u
             return {'CANCELLED'}
         else:  # For the Relax operator
             return {'CANCELLED'}, None, None
+
+    if restore_selected:
+        faces_by_island = _tag_relax_faces(bm, faces_by_island)
+        uv_layers = bm.loops.layers.uv.verify()
 
     if delete_unselected:
         if mode != 'OBJECT':
@@ -137,6 +183,9 @@ def create_uv_mesh(self, context, obj, sk_create=True, bool_scale=True, delete_u
                     if not set(edge.link_loops).issubset(selection_loops):
                         edge.select_set(True)
         bpy.ops.mesh.edge_split(type='EDGE')
+        bm = bmesh.from_edit_mesh(mesh_obj.data)
+        uv_layers = bm.loops.layers.uv.verify()
+        faces_by_island = _get_tagged_relax_faces(bm)
         bmesh.update_edit_mesh(mesh_obj.data)
         bpy.ops.mesh.select_all(action='SELECT')  # TODO REFINE
 
@@ -158,8 +207,6 @@ def create_uv_mesh(self, context, obj, sk_create=True, bool_scale=True, delete_u
         if length_uv > 0:
             scale = length_view / length_uv
 
-    bm.free()
-
     bpy.ops.mesh.edge_split(type='EDGE')
     bpy.ops.object.mode_set(mode='OBJECT')
 
@@ -174,6 +221,8 @@ def create_uv_mesh(self, context, obj, sk_create=True, bool_scale=True, delete_u
 
     bm = bmesh.from_edit_mesh(mesh_obj.data)
     uv_layers = bm.loops.layers.uv.verify()
+    if restore_selected:
+        faces_by_island = _get_tagged_relax_faces(bm)
 
     visited_verts = set()
     for face in bm.faces:

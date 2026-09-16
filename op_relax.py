@@ -28,13 +28,17 @@ class op(bpy.types.Operator):
 			return False
 		if not bpy.context.active_object.data.uv_layers:
 			return False
-		if context.scene.tool_settings.use_uv_select_sync:
-			return False
 		return True
 
 
 	def execute(self, context):
-		utilities_uv.multi_object_loop(relax, self, context)	
+		with utilities_uv.uv_sync_selection_context():
+			selection = _capture_uv_selection()
+			try:
+				utilities_uv.multi_object_loop(relax, self, context)
+			finally:
+				for obj, state in selection:
+					_restore_uv_selection(obj, state)
 		return {'FINISHED'}
 
 
@@ -58,6 +62,9 @@ def relax(self, context):
 
 	# Smooth mesh
 	bpy.ops.mesh.vertices_smooth(factor=0.5, repeat=self.iterations)
+	bm = bmesh.from_edit_mesh(temp_obj.data)
+	uv_layers = bm.loops.layers.uv.verify()
+	faces_by_island = op_meshtex_create._get_tagged_relax_faces(bm)
 
 
 	# Mesh to UV
@@ -97,10 +104,14 @@ def relax(self, context):
 
 	# Copy and Paste UVs between temporary and original meshes
 	copied_uvs = defaultdict(list)
+	original_face_layer = bm.faces.layers.int.get(op_meshtex_create._ORIGINAL_FACE_LAYER)
 	for face in bm.faces:
-		if face.select:
+		if face.select and original_face_layer is not None:
+			original_face_index = face[original_face_layer] - 1
+			if original_face_index < 0:
+				continue
 			for loop in face.loops:
-				copied_uvs[face.index].append(loop[uv_layers].uv.to_tuple())
+				copied_uvs[original_face_index].append(loop[uv_layers].uv.to_tuple())
 
 	bpy.ops.object.mode_set(mode='OBJECT', toggle=False)
 	bpy.ops.object.select_all(action='DESELECT')
@@ -120,3 +131,33 @@ def relax(self, context):
 	# Remove temporary mesh and restore selection mode altered by meshtex_create
 	bpy.data.meshes.remove(bpy.data.meshes[temp_obj_data_name], do_unlink=True)
 	bpy.context.scene.tool_settings.mesh_select_mode = pre_selection_mode
+
+
+def _capture_uv_selection():
+	selection = []
+	for obj in utilities_uv.selected_unique_objects_in_mode_with_uv():
+		bm = bmesh.from_edit_mesh(obj.data)
+		uv_layer = bm.loops.layers.uv.verify()
+		state = [
+			(
+				utilities_uv.get_loop_selection(loop, uv_layer, bm=bm),
+				utilities_uv.get_loop_edge_selection(loop, uv_layer),
+			)
+			for face in bm.faces
+			for loop in face.loops
+		]
+		selection.append((obj, state))
+	return selection
+
+
+def _restore_uv_selection(obj, selection):
+	if obj.mode != 'EDIT':
+		return
+	bm = bmesh.from_edit_mesh(obj.data)
+	uv_layer = bm.loops.layers.uv.verify()
+	loops = [loop for face in bm.faces for loop in face.loops]
+	for loop, (_, edge_selected) in zip(loops, selection):
+		utilities_uv.set_loop_edge_selection(loop, uv_layer, edge_selected)
+	for loop, (vertex_selected, _) in zip(loops, selection):
+		utilities_uv.set_loop_selection(loop, uv_layer, vertex_selected, bm=bm)
+	bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
