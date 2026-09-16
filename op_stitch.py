@@ -22,14 +22,13 @@ class op(bpy.types.Operator):
 			return False
 		if bpy.context.active_object.type != 'MESH':
 			return False
-		if context.scene.tool_settings.use_uv_select_sync:
-			return False
 		if not bpy.context.object.data.uv_layers:
 			return False
 		return True
 
 	def execute(self, context):
-		utilities_uv.multi_object_loop(main, self, context)
+		with utilities_uv.uv_sync_selection_context():
+			utilities_uv.multi_object_loop(main, self, context)
 		return {'FINISHED'}
 
 

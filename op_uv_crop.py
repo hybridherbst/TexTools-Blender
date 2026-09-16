@@ -28,7 +28,8 @@ class op(bpy.types.Operator):
 		return True
 
 	def execute(self, context):
-		return crop(self)
+		with utilities_uv.preserve_mesh_selection_context():
+			return crop(self)
 
 
 def crop(self, distort=False, general_bbox=None):

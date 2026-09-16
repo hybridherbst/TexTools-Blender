@@ -1,6 +1,7 @@
 import bpy
 
 from . import settings
+from . import utilities_uv
 
 
 
@@ -28,6 +29,10 @@ class op(bpy.types.Operator):
 
 
 	def execute(self, context):
+		with utilities_uv.preserve_mesh_selection_context():
+			return self._execute(context)
+
+	def _execute(self, context):
 		sync = bpy.context.scene.tool_settings.use_uv_select_sync
 		if sync:
 			selection_mode = tuple(bpy.context.scene.tool_settings.mesh_select_mode)

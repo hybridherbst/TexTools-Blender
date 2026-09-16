@@ -19,13 +19,15 @@ class op(bpy.types.Operator):
 		if bpy.context.active_object.mode != 'EDIT':
 			return False
 		if bpy.context.scene.tool_settings.use_uv_select_sync:
-			return False
-		if bpy.context.scene.tool_settings.uv_select_mode not in ('EDGE', 'VERTEX'):
+			if not any(bpy.context.scene.tool_settings.mesh_select_mode[:2]):
+				return False
+		elif bpy.context.scene.tool_settings.uv_select_mode not in ('EDGE', 'VERTEX'):
 			return False
 		return True
 
 	def execute(self, context):
-		return main(self, context)
+		with utilities_uv.uv_sync_selection_context():
+			return main(self, context)
 
 def main(self, context):
 	counter = 0

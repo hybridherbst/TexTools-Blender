@@ -2,6 +2,7 @@ import math
 import bmesh
 import bpy
 import mathutils
+from contextlib import contextmanager
 from mathutils import Vector
 
 from . import settings
@@ -11,62 +12,157 @@ precision = 5
 multi_object_loop_stop = False
 
 
-def _get_select_layer(bm, create_if_missing=False):
-    layer = bm.loops.layers.bool.get('select')
-    if not layer and create_if_missing:
-        layer = bm.loops.layers.bool.new('select')
-    return layer
+@contextmanager
+def preserve_mesh_selection_context():
+    """Restore the exact edit-mesh component selection after a UV operation."""
+    scene = bpy.context.scene
+    mesh_select_mode = tuple(scene.tool_settings.mesh_select_mode)
+    snapshots = []
+    for obj in selected_unique_objects_in_mode_with_uv():
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        bm.verts.index_update()
+        bm.edges.index_update()
+        bm.faces.index_update()
+        snapshots.append((
+            obj,
+            {vert.index for vert in bm.verts if vert.select},
+            {edge.index for edge in bm.edges if edge.select},
+            {face.index for face in bm.faces if face.select},
+        ))
+
+    try:
+        yield
+    finally:
+        scene.tool_settings.mesh_select_mode = mesh_select_mode
+        for obj, selected_verts, selected_edges, selected_faces in snapshots:
+            if obj.name not in bpy.context.view_layer.objects or obj.mode != 'EDIT':
+                continue
+            bm = bmesh.from_edit_mesh(obj.data)
+            for face in bm.faces:
+                face.select = face.index in selected_faces
+            for edge in bm.edges:
+                edge.select = edge.index in selected_edges
+            for vert in bm.verts:
+                vert.select = vert.index in selected_verts
+            bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+
+
+@contextmanager
+def uv_sync_selection_context():
+    """Expose synchronized mesh selection as UV-loop selection temporarily."""
+    scene = bpy.context.scene
+    if not scene.tool_settings.use_uv_select_sync:
+        yield
+        return
+
+    mesh_select_mode = tuple(scene.tool_settings.mesh_select_mode)
+    snapshots = []
+    for obj in selected_unique_objects_in_mode_with_uv():
+        bm = bmesh.from_edit_mesh(obj.data)
+        bm.verts.ensure_lookup_table()
+        bm.edges.ensure_lookup_table()
+        bm.faces.ensure_lookup_table()
+        bm.verts.index_update()
+        bm.edges.index_update()
+        bm.faces.index_update()
+        snapshots.append((
+            obj,
+            {vert.index for vert in bm.verts if vert.select},
+            {edge.index for edge in bm.edges if edge.select},
+            {face.index for face in bm.faces if face.select},
+        ))
+
+    scene.tool_settings.use_uv_select_sync = False
+    try:
+        for obj, selected_verts, selected_edges, selected_faces in snapshots:
+            bm = bmesh.from_edit_mesh(obj.data)
+            uv_layer = bm.loops.layers.uv.verify()
+
+            for face in bm.faces:
+                face_selected = mesh_select_mode[2] and face.index in selected_faces
+                for loop in face.loops:
+                    vertex_selected = face_selected or (
+                        mesh_select_mode[0] and loop.vert.index in selected_verts
+                    )
+                    edge_selected = face_selected or (
+                        mesh_select_mode[1] and loop.edge.index in selected_edges
+                    ) or (
+                        mesh_select_mode[0]
+                        and loop.vert.index in selected_verts
+                        and loop.link_loop_next.vert.index in selected_verts
+                    )
+                    set_loop_selection(loop, uv_layer, vertex_selected or edge_selected)
+                    set_loop_edge_selection(loop, uv_layer, edge_selected)
+
+            for face in bm.faces:
+                # With Sync disabled, mesh-face selection controls which faces
+                # are visible/available in the UV editor. Keep the whole
+                # non-hidden mesh available while UV-loop selection retains
+                # the user's synchronized component selection.
+                face.select = not face.hide
+            bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+
+        yield
+    finally:
+        scene.tool_settings.mesh_select_mode = mesh_select_mode
+        for obj, selected_verts, selected_edges, selected_faces in snapshots:
+            if obj.name not in bpy.context.view_layer.objects or obj.mode != 'EDIT':
+                continue
+            bm = bmesh.from_edit_mesh(obj.data)
+            for face in bm.faces:
+                face.select = face.index in selected_faces
+            for edge in bm.edges:
+                edge.select = edge.index in selected_edges
+            for vert in bm.verts:
+                vert.select = vert.index in selected_verts
+            bmesh.update_edit_mesh(obj.data, loop_triangles=False, destructive=False)
+        scene.tool_settings.use_uv_select_sync = True
 
 
 def get_loop_selection(loop, uv_layers, bm=None):
+    if bpy.context.scene.tool_settings.use_uv_select_sync:
+        return loop.vert.select
     if settings.bversion >= 5.0:
-        if bm is None:
-            try:
-                bm = loop.face.bm
-            except AttributeError:
-                pass
-
-            if bm is None and bpy.context.active_object and bpy.context.active_object.type == 'MESH':
-                pass
-
-        if bm:
-            layer = _get_select_layer(bm, create_if_missing=False)
-            if layer:
-                return loop[layer]
-        return False
+        return loop.uv_select_vert
     return loop[uv_layers].select
 
 
 def set_loop_selection(loop, uv_layers, value, bm=None):
+    if bpy.context.scene.tool_settings.use_uv_select_sync:
+        loop.vert.select_set(value)
+        return
     if settings.bversion >= 5.0:
-        if bm is None:
-            try:
-                bm = loop.face.bm
-            except AttributeError:
-                pass
-
-        if bm:
-            layer = _get_select_layer(bm, create_if_missing=True)
-            loop[layer] = value
+        loop.uv_select_vert_set(value)
     else:
         loop[uv_layers].select = value
 
 
 def get_loop_edge_selection(loop, uv_layers):
+    if bpy.context.scene.tool_settings.use_uv_select_sync:
+        return loop.edge.select
     if settings.bversion >= 5.0:
-        return False
+        return loop.uv_select_edge
     return loop[uv_layers].select_edge
 
 
 def set_loop_edge_selection(loop, uv_layers, value):
+    if bpy.context.scene.tool_settings.use_uv_select_sync:
+        loop.edge.select_set(value)
+        return
     if settings.bversion >= 5.0:
-        pass
+        loop.uv_select_edge_set(value)
     else:
         loop[uv_layers].select_edge = value
 
 
 def multi_object_loop(func, *args, need_results=False, **kwargs):
-    selected_obs = [ob for ob in bpy.context.selected_objects if ob.type == 'MESH']
+    if bpy.context.active_object and bpy.context.active_object.mode == 'EDIT':
+        selected_obs = [ob for ob in bpy.context.objects_in_mode_unique_data if ob.type == 'MESH']
+    else:
+        selected_obs = [ob for ob in bpy.context.selected_objects if ob.type == 'MESH']
     preactiv_name = None
     if bpy.context.view_layer.objects.active:
         preactiv_name = bpy.context.view_layer.objects.active.name
@@ -93,8 +189,7 @@ def multi_object_loop(func, *args, need_results=False, **kwargs):
         premode = bpy.context.active_object.mode
 
         bpy.ops.object.mode_set(mode='EDIT', toggle=False)
-        unique_selected_obs = [ob for ob in bpy.context.objects_in_mode_unique_data if
-                               ob.type == 'MESH' and ob.select_get()]
+        unique_selected_obs = selected_obs.copy()
         bpy.ops.object.mode_set(mode='OBJECT', toggle=False)
         bpy.ops.object.select_all(action='DESELECT')
 
@@ -166,9 +261,6 @@ def selection_store(bm=None, uv_layers=None, return_selected_UV_faces=False, ret
     elif return_selected_faces_edges or return_selected_faces_loops:
         selected_faces_loops = {}
 
-    if settings.bversion >= 5.0:
-        _get_select_layer(bm, create_if_missing=True)
-
     for face in bm.faces:
         if face.select:
             settings.selection_face_indexies.add(face.index)
@@ -182,7 +274,7 @@ def selection_store(bm=None, uv_layers=None, return_selected_UV_faces=False, ret
 
             is_selected = get_loop_selection(loop, uv_layers, bm=bm)
 
-            if not is_selected and face.select:
+            if settings.use_uv_sync and not is_selected and face.select:
                 is_selected = True
 
             if is_selected:
@@ -256,9 +348,6 @@ def selection_restore(bm=None, uv_layers=None, restore_seams=False):
         if index < len(bm.faces):
             bm.faces[index].select = True
 
-    if settings.bversion >= 5.0:
-        _get_select_layer(bm, create_if_missing=True)
-
     if contextViewUV:
         if settings.bversion >= 3.2:
             with bpy.context.temp_override(**contextViewUV):
@@ -281,7 +370,13 @@ def selection_restore(bm=None, uv_layers=None, restore_seams=False):
     # Workaround for selection not flushing properly from loops in EDGE or FACE UV Selection Mode,
     # apparently since UV edge selection support was added to the UV space
     if settings.selection_uv_mode != "VERTEX":
-        bpy.ops.uv.select_mode(type='VERTEX')
+        if settings.bversion >= 5.0:
+            bm.uv_select_flush_mode(flush_down=True)
+        elif contextViewUV:
+            with bpy.context.temp_override(**contextViewUV):
+                bpy.ops.uv.select_mode(type='VERTEX')
+        elif bpy.ops.uv.select_mode.poll():
+            bpy.ops.uv.select_mode(type='VERTEX')
     bpy.context.scene.tool_settings.uv_select_mode = settings.selection_uv_mode
 
     bpy.context.view_layer.update()
@@ -610,6 +705,8 @@ def getAllIslands(bm, uv_layers):
 
 def getSelectionIslands(bm, uv_layers, extend_selection_to_islands=False, selected_faces=None, need_faces_selected=True,
                         restore_selected=True):
+    bm.faces.ensure_lookup_table()
+    bm.faces.index_update()
     if selected_faces is None:
         if need_faces_selected:
             selected_faces = get_selected_uv_faces(bm, uv_layers, rtype=set)
@@ -637,12 +734,20 @@ def getSelectionIslands(bm, uv_layers, extend_selection_to_islands=False, select
 
         getFacesIslands(bm, uv_layers, selected_faces, islands, disordered_island_faces)
 
+        # UV selection operators can rebuild Blender 5's edit BMesh and
+        # invalidate every BMFace wrapper collected above. Face topology does
+        # not change here, so retain stable indices and reacquire fresh handles
+        # before returning them to callers.
+        island_face_indices = [[face.index for face in island] for island in islands]
+
         # Restore selection
         if restore_selected:
             bpy.ops.uv.select_all(action='DESELECT')
             set_selected_faces(selected_faces, bm, uv_layers)
 
-    return islands
+    bm = bmesh.from_edit_mesh(bpy.context.active_object.data)
+    bm.faces.ensure_lookup_table()
+    return [{bm.faces[index] for index in island} for island in island_face_indices]
 
 
 def getSelectedUnselectedIslands(bm, uv_layers, selected_faces=None, target_faces=None, restore_selected=False):

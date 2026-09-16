@@ -31,6 +31,10 @@ class op(bpy.types.Operator):
 		return True
 
 	def execute(self, context):
+		with utilities_uv.preserve_mesh_selection_context():
+			return self._execute(context)
+
+	def _execute(self, context):
 		selected_obs = utilities_uv.selected_unique_objects_in_mode_with_uv()
 		sync = bpy.context.scene.tool_settings.use_uv_select_sync
 		if sync:

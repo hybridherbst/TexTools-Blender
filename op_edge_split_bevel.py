@@ -30,13 +30,12 @@ class op(bpy.types.Operator):
 			return False
 		if not bpy.context.object.data.uv_layers:
 			return False
-		if bpy.context.scene.tool_settings.use_uv_select_sync:
-			return False
 		return True
 
 
 	def execute(self, context):
-		main(self, self.radius)
+		with utilities_uv.uv_sync_selection_context():
+			main(self, self.radius)
 		return {'FINISHED'}
 
 
