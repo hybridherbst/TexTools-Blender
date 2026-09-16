@@ -35,3 +35,12 @@ Back in 2009, @renderhjs released the [Original TexTools](http://renderhjs.net/t
 
 ## Documentation ##
 Visit the [Official Website & Documentation](http://renderhjs.net/textools/blender/) for an in depth overview of the original tools (outdated)
+
+### UV straightening tools
+
+- **Straight** straightens one open UV edge chain, temporarily pins it, and relaxes the surrounding island.
+- **Grid Straight** makes every selected grid row and column horizontal or vertical while retaining their existing distribution.
+- **Grid Relax** solves each connected grid independently and jointly redistributes rows and columns to minimize per-face 3D aspect error. **Movable Boundary** defaults to **Auto (Least Straight)** so an incompatible AABB cannot force stretch across every panel; choose **Fixed AABB** explicitly to lock all four bounds.
+- **Rectify** rebuilds selected quad faces as a rectangular Follow Active Quads layout.
+- **Iron Faces** unwraps the selected faces while preserving their exact original UV AABB and stabilizing the result against arbitrary unwrap rotation. **Align to Axes** snaps a clear dominant direction horizontally or vertically while leaving near-radial shapes unsnapped.
+- UV Sync is supported by Relax, Straight, Align Edge, Stitch, Unwrap, and Split Bevel; synchronized mesh component selections are translated temporarily without changing the original mesh selection.

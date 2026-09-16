@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 id = "textools"
 version = "1.6.11"
 name = "TexTools"
-tagline = "Professional UV and Texture tools for Blender."
+tagline = "Professional UV and Texture tools for Blender"
 type = "add-on"
 
 maintainer = "renderhjs, franMarz, Sav Martin"
@@ -18,4 +18,4 @@ license = [
 ]
 
 [permissions]
-files = "Required for baking textures and saving/loading images."
+files = "Required for baking textures and saving/loading images"
