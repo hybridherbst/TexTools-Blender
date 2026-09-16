@@ -47,7 +47,16 @@ def align_uv_rectify(
     bmesh.update_edit_mesh(mesh_data)
 
     try:
-        bpy.ops.uv.follow_active_quads(mode="EVEN")
+        with bpy.context.temp_override(
+            active_object=obj,
+            object=obj,
+            edit_object=obj,
+            selected_objects=[obj],
+            selected_editable_objects=[obj],
+            objects_in_mode=[obj],
+            objects_in_mode_unique_data=[obj],
+        ):
+            bpy.ops.uv.follow_active_quads(mode="EVEN")
     except RuntimeError:
         return False
 

@@ -115,9 +115,8 @@ def straighten(self, bm, uv_layers, island, segment_loops):
 
     try:  # Unwrapping may fail on certain mesh topologies
         bpy.ops.uv.unwrap(method='ANGLE_BASED', fill_holes=True, correct_aspect=True, use_subsurf_data=False, margin=0)
-    except:
+    except RuntimeError:
         self.report({'ERROR_INVALID_INPUT'}, "Unwrapping failed, unsupported island topology.")
-        pass
 
     for nodeLoop in newly_pinned:
         nodeLoop[uv_layers].pin_uv = False
@@ -212,7 +211,7 @@ def get_loops_segments(self, bm, uv_layers, island_loops_dirty):
                                     precision):
                                 island_nodal_loops.remove(anyLoop)
                         return foundLoop, False
-                get_prev(set(island_nodal_loops).intersection(loop.link_loop_prev.vert.link_loops))
+                return get_prev(set(island_nodal_loops).intersection(loop.link_loop_prev.vert.link_loops))
 
             found_next = set(island_nodal_loops).intersection(loop.link_loop_next.vert.link_loops)
             if found_next:
@@ -250,8 +249,9 @@ def get_loops_segments(self, bm, uv_layers, island_loops_dirty):
                         island_nodal_loops.remove(loop.link_loop_prev)
 
                 if not island_nodal_loops:
+                    if not end:
+                        openSegments.append(segment)
                     end = True
-                    openSegments.append(segment)
                     break
 
         if len(openSegments) > 1:

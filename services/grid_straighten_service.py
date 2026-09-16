@@ -161,9 +161,40 @@ def _split_by_axis(edges, node_data):
     horizontal_edges = []
     vertical_edges = []
 
+    # Treat perpendicular grid edges as the same orientation modulo 90 degrees.
+    # This derives the two families from the grid itself, so a grid rotated by
+    # 45 degrees cannot have both families classified against the same UV axis.
+    orientation_x = 0.0
+    orientation_y = 0.0
+    longest_delta = None
     for edge in edges:
         delta = node_data[edge.second].uv - node_data[edge.first].uv
-        if abs(delta.x) >= abs(delta.y):
+        if delta.length_squared <= 1e-24:
+            continue
+        angle = math.atan2(delta.y, delta.x)
+        orientation_x += math.cos(4.0 * angle) * delta.length
+        orientation_y += math.sin(4.0 * angle) * delta.length
+        if longest_delta is None or delta.length_squared > longest_delta.length_squared:
+            longest_delta = delta
+
+    if longest_delta is None:
+        return horizontal_graph, vertical_graph, horizontal_edges, vertical_edges
+
+    if math.hypot(orientation_x, orientation_y) <= 1e-12:
+        family_angle = math.atan2(longest_delta.y, longest_delta.x)
+    else:
+        family_angle = 0.25 * math.atan2(orientation_y, orientation_x)
+
+    first_axis = Vector((math.cos(family_angle), math.sin(family_angle)))
+    second_axis = Vector((-first_axis.y, first_axis.x))
+    if abs(first_axis.x) >= abs(second_axis.x):
+        horizontal_axis, vertical_axis = first_axis, second_axis
+    else:
+        horizontal_axis, vertical_axis = second_axis, first_axis
+
+    for edge in edges:
+        delta = node_data[edge.second].uv - node_data[edge.first].uv
+        if abs(delta.dot(horizontal_axis)) >= abs(delta.dot(vertical_axis)):
             graph = horizontal_graph
             horizontal_edges.append(edge)
         else:
