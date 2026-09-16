@@ -1,5 +1,6 @@
 import bmesh
 import bpy
+from . import utilities_uv
 from .services.rectify_service import align_uv_rectify
 
 
@@ -20,13 +21,30 @@ class op(bpy.types.Operator):
         return True
 
     def execute(self, context):
-        obj = context.active_object
-        bm = bmesh.from_edit_mesh(obj.data)
-        uv_layer = bm.loops.layers.uv.verify()
+        active_object = context.view_layer.objects.active
+        processed = False
 
-        success = align_uv_rectify(obj, bm, uv_layer.name, True)
+        try:
+            for obj in utilities_uv.selected_unique_objects_in_mode_with_uv():
+                bm = bmesh.from_edit_mesh(obj.data)
+                uv_layer = bm.loops.layers.uv.active
+                if uv_layer is None:
+                    continue
 
-        if not success:
+                selected_faces = utilities_uv.get_selected_uv_faces(bm, uv_layer)
+                if not selected_faces:
+                    continue
+
+                context.view_layer.objects.active = obj
+                if align_uv_rectify(
+                    obj, bm, uv_layer.name, keep_bounds=True, target_faces=selected_faces
+                ):
+                    bmesh.update_edit_mesh(obj.data)
+                    processed = True
+        finally:
+            context.view_layer.objects.active = active_object
+
+        if not processed:
             self.report({'WARNING'}, "No quads selected or operation failed.")
             return {'CANCELLED'}
 
